@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Xbox Controller Canvas</title>
+    <style>
+        body {
+            margin: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            position: relative;
+        }
+        #gameCanvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+        }
+        #info {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: black;
+            font-family: Arial, sans-serif;
+            z-index: 10; /* Ensure info is on top */
+        }
+        #backgroundImage {
+            width: auto;
+            height: auto;
+            max-width: 100%;
+            max-height: 100%;
+        }
+    </style>
+</head>
+<body>
+    <img id="backgroundImage" src="https://i.imgur.com/w7YNk93.png" alt="Background Image" onload="resizeCanvas()">
+    <canvas id="gameCanvas"></canvas>
+    <div id="info"></div>
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const infoDiv = document.getElementById('info');
+
+        let square = {
+            x: 0,
+            y: 0,
+            size: 30,
+            movementSpeed: 1.8,
+            angle: 0,
+            targetAngle: 0,
+            hasExtendedLimb: false,
+            yButtonPressed: false, // Track button press state
+            rotationSpeed: 8, // Speed of rotation in degrees per update
+            wheelSpeeds: [0, 0, 0, 0] // Speeds for each wheel
+        };
+
+        const POSITION_DEADZONE = 0.1; // Adjust position deadzone as needed
+        const ROTATION_DEADZONE = 0.6; // Adjust rotation deadzone as needed
+        const EXTENDED_LIMB_LENGTH = 60; // Length of the extended limb
+        const EXTENDED_LIMB_WIDTH = 30; // Width of the scoop
+        const WHEEL_RADIUS = 5; // Radius of the swerve wheel circles
+
+        function drawSquare() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.save();
+            ctx.translate(square.x, square.y);
+            ctx.rotate(square.angle);
+
+            // Draw thick borders
+            ctx.fillStyle = 'blue';
+            ctx.fillRect(-square.size / 2 - 5, -square.size / 2 - 5, square.size + 10, square.size + 10); // Blue border
+            ctx.fillStyle = 'red';
+            ctx.fillRect(-square.size / 2 - 2, -square.size / 2 - 2, square.size + 4, square.size + 4); // Red border
+            
+            // Draw the gray robot body
+            ctx.fillStyle = 'gray';
+            ctx.fillRect(-square.size / 2, -square.size / 2, square.size, square.size);
+            ctx.restore();
+
+            // Draw the extended limb if activated
+            if (square.hasExtendedLimb) {
+                drawExtendedLimb();
+            }
+
+            // Draw the marker at the front of the square
+            drawMarker();
+
+            // Draw the swerve wheels
+            drawSwerveWheels();
+        }
+
+        function drawMarker() {
+            const markerLength = 20; // Length of the marker
+            const frontX = square.x + Math.cos(square.angle) * (square.size / 2 + markerLength);
+            const frontY = square.y + Math.sin(square.angle) * (square.size / 2 + markerLength);
+
+            ctx.beginPath();
+            ctx.moveTo(square.x, square.y); // Start at the center of the square
+            ctx.lineTo(frontX, frontY); // Draw line to the front of the square
+            ctx.strokeStyle = 'red'; // Marker color
+            ctx.lineWidth = 2;
+            ctx.stroke();
+        }
+
+        function drawExtendedLimb() {
+            const frontX = square.x + Math.cos(square.angle) * (square.size / 2);
+            const frontY = square.y + Math.sin(square.angle) * (square.size / 2);
+
+            ctx.save();
+            ctx.translate(frontX, frontY);
+            ctx.rotate(square.angle); // Rotate the limb with the robot
+            ctx.fillStyle = 'darkgray'; // Darker color for the scoop
+            ctx.fillRect(-EXTENDED_LIMB_LENGTH / 2, -EXTENDED_LIMB_WIDTH / 2, EXTENDED_LIMB_LENGTH, EXTENDED_LIMB_WIDTH); // Draw the scoop
+            ctx.restore();
+        }
+
+        function drawSwerveWheels() {
+            const halfSize = square.size / 2;
+            const wheelOffsets = [
+                { x: -halfSize - 1, y: -halfSize - 1 }, // Top left
+                { x: halfSize + 1, y: -halfSize - 1 },  // Top right
+                { x: -halfSize - 1, y: halfSize + 1 },  // Bottom left
+                { x: halfSize + 1, y: halfSize + 1 }     // Bottom right
+            ];
+
+            wheelOffsets.forEach((offset, index) => {
+                const wheelX = offset.x;
+                const wheelY = offset.y;
+
+                ctx.save();
+                ctx.translate(square.x, square.y);
+                ctx.rotate(square.angle);
+
+                // Draw wheel
+                ctx.fillStyle = 'black';
+                ctx.beginPath();
+                ctx.arc(wheelX - 1, wheelY - 1, WHEEL_RADIUS, 0, Math.PI * 1); // Draw wheel
+                ctx.fill();
+
+                ctx.restore();
+            });
+        }
+
+        function updateInfo(leftX, leftY, rightX, rightY) {
+            infoDiv.innerHTML = `
+                <strong>Left Joystick:</strong> <br>
+                X: ${leftX.toFixed(2)} <br>
+                Y: ${leftY.toFixed(2)} <br>
+                <strong>Right Joystick:</strong> <br>
+                X: ${rightX.toFixed(2)} <br>
+                Y: ${rightY.toFixed(2)} <br>
+                <strong>Robot:</strong> <br>
+                X: ${square.x.toFixed(2)} <br>
+                Y: ${square.y.toFixed(2)} <br>
+                Max-Speed: ${square.movementSpeed} <br>
+                Angle: ${square.angle.toFixed(2)} <br>
+                Rotation-Speed: ${square.rotationSpeed} <br>
+                Extended Limb: ${square.hasExtendedLimb ? 'ON' : 'OFF'}
+            `;
+        }
+
+        function isOutsideDeadzone(value, deadzone) {
+            return Math.abs(value) >= deadzone;
+        }
+
+        function handleGamepadInput() {
+            const gamepads = navigator.getGamepads();
+            const gamepad = gamepads[0];
+
+            if (gamepad) {
+                const leftX = gamepad.axes[0]; // Left joystick X-axis
+                const leftY = -gamepad.axes[1]; // Inverted Left joystick Y-axis
+                const rightX = gamepad.axes[2]; // Right joystick X-axis
+                const rightY = gamepad.axes[3]; // Right joystick Y-axis
+
+                // Update position based on left joystick only if outside position deadzone
+                if (isOutsideDeadzone(leftX, POSITION_DEADZONE)) {
+                    square.x += leftX * square.movementSpeed; // Adjust speed as needed
+                }
+                if (isOutsideDeadzone(leftY, POSITION_DEADZONE)) {
+                    square.y -= leftY * square.movementSpeed; // Invert Y to match typical canvas coordinates
+                }
+
+                // Normalize right joystick to an angle in degrees only if outside rotation deadzone
+                if (isOutsideDeadzone(rightX, ROTATION_DEADZONE) || isOutsideDeadzone(rightY, ROTATION_DEADZONE)) {
+                    square.targetAngle = normalizeToDegrees(rightX, rightY);
+                }
+
+                // Gradually rotate towards the target angle
+                rotateTowardsTarget();
+
+                // Check for "Y" button release to toggle extended limb
+                if (gamepad.buttons[3].pressed && !square.yButtonPressed) { // "Y" button index
+                    square.hasExtendedLimb = !square.hasExtendedLimb; // Toggle state
+                    square.yButtonPressed = true; // Mark button as pressed
+                } else if (!gamepad.buttons[3].pressed) {
+                    square.yButtonPressed = false; // Reset when button is released
+                }
+
+                updateInfo(leftX, leftY, rightX, rightY); // Update joystick info display
+            }
+
+            requestAnimationFrame(handleGamepadInput);
+        }
+
+        function rotateTowardsTarget() {
+            let angleDifference = square.targetAngle - square.angle * (180 / Math.PI); // Convert to degrees
+            // Normalize angleDifference to be within -180 to 180
+            if (angleDifference > 180) angleDifference -= 360;
+            if (angleDifference < -180) angleDifference += 360;
+
+            if (Math.abs(angleDifference) > square.rotationSpeed) {
+                square.angle += (angleDifference > 0 ? square.rotationSpeed : -square.rotationSpeed) * (Math.PI / 180); // Convert to radians
+            } else {
+                square.angle = square.targetAngle * (Math.PI / 180); // Snap to target angle
+            }
+        }
+
+        function normalizeToDegrees(x, y) {
+            let angle = Math.atan2(y, x); // Calculate angle in radians
+            angle = angle * (180 / Math.PI); // Convert to degrees
+            return (angle + 360) % 360; // Normalize to [0, 360)
+        }
+
+        window.addEventListener('gamepadconnected', () => {
+            console.log('Gamepad connected!');
+            handleGamepadInput();
+            update();
+        });
+
+        window.addEventListener('gamepaddisconnected', () => {
+            console.log('Gamepad disconnected!');
+        });
+
+        function update() {
+            drawSquare();
+            requestAnimationFrame(update);
+        }
+
+        function resizeCanvas() {
+            const imgWidth = document.getElementById('backgroundImage').clientWidth;
+            const imgHeight = document.getElementById('backgroundImage').clientHeight;
+            canvas.width = imgWidth;
+            canvas.height = imgHeight;
+            square.x = imgWidth / 2; // Center square in new canvas
+            square.y = imgHeight / 2; // Center square in new canvas
+        }
+
+        // Initial resize when the image loads
+        window.addEventListener('resize', resizeCanvas);
+        window.dispatchEvent(new Event('resize'));
+    </script>
+</body>
+</html>
